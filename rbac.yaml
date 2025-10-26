@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: stream-monitor-sa
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: stream-monitor-role
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: stream-monitor-rb
+subjects:
+- kind: ServiceAccount
+  name: stream-monitor-sa
+roleRef:
+  kind: Role
+  name: stream-monitor-role
+  apiGroup: rbac.authorization.k8s.io

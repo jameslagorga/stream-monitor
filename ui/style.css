@@ -1,0 +1,33 @@
+body {
+    font-family: sans-serif;
+    background-color: #f0f0f0;
+    color: #333;
+    margin: 2em;
+}
+
+h1 {
+    color: #d9534f;
+}
+
+ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+li {
+    background-color: #fff;
+    margin: 0.5em 0;
+    padding: 1em;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+a {
+    text-decoration: none;
+    color: #0275d8;
+    font-weight: bold;
+}
+
+a:hover {
+    text-decoration: underline;
+}

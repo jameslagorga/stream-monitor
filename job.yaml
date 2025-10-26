@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stream-monitor-job
+spec:
+  ttlSecondsAfterFinished: 100
+  template:
+    spec:
+      serviceAccountName: stream-monitor-sa
+      restartPolicy: OnFailure
+      volumes:
+      - name: nfs-storage
+        persistentVolumeClaim:
+          claimName: filestore-pvc
+      containers:
+      - name: monitor
+        image: gcr.io/lagorgeous-helping-hands/stream-monitor:latest
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: TWITCH_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: twitch-api-credentials
+              key: client_id
+        - name: TWITCH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: twitch-api-credentials
+              key: client_secret
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /mnt/nfs/jobs/stream-monitor && \
+          /app/monitor.sh 2>&1 | tee /mnt/nfs/jobs/stream-monitor/${POD_NAME}.log
+        volumeMounts:
+        - name: nfs-storage
+          mountPath: /mnt/nfs
