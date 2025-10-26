@@ -42,7 +42,7 @@ fi
 echo "Successfully found Category ID for '$GAME_NAME': $LEGO_CATEGORY_ID"
 
 
-# --- 3. Fetch Live Streams and Start Recorders ---
+# --- 3. Fetch Live Streams and Start Recorders and Annotators ---
 echo "Fetching live streams for category ID $LEGO_CATEGORY_ID"...
 STREAMS_RESPONSE=$(curl -s -X GET "https://api.twitch.tv/helix/streams?game_id=$LEGO_CATEGORY_ID&first=20" \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -64,29 +64,4 @@ else
     done
 fi
 
-# --- 4. Aggregate All Results for the UI ---
-echo "Aggregating all hand-finder results for UI..."
-AGGREGATED_JSON="{}"
-
-for stream_dir in "$STREAMS_PATH"/*/; do
-    if [ ! -d "$stream_dir" ]; then continue; fi
-    stream_name=$(basename "$stream_dir")
-    sample_dir="$stream_dir/sample"
-    if [ ! -d "$sample_dir" ]; then continue; fi
-
-    # Check if there are any json files to avoid errors
-    if ls "$sample_dir"/*.json 1> /dev/null 2>&1; then
-        json_array=$(jq -s '.' "$sample_dir"/*.json)
-        if [[ -n "$json_array" && "$json_array" != "null" ]]; then
-            AGGREGATED_JSON=$(echo "$AGGREGATED_JSON" | jq --argjson data "$json_array" --arg name "$stream_name" '. + {($name): $data}')
-        fi
-    fi
-done
-
-# --- 5. Write UI Data File ---
-mkdir -p "$UI_OUTPUT_PATH"
-output_file="$UI_OUTPUT_PATH/analysis_data.json"
-echo "$AGGREGATED_JSON" > "$output_file"
-
-echo "Wrote aggregated UI data to $output_file."
 echo "--- Cycle finished. ---"
