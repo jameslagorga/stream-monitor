@@ -49,18 +49,43 @@ STREAMS_RESPONSE=$(curl -s -X GET "https://api.twitch.tv/helix/streams?game_id=$
     -H "Client-Id: $TWITCH_CLIENT_ID")
 LIVE_STREAMS=$(echo "$STREAMS_RESPONSE" | jq -c '.data[]')
 
+# --- 4. Clean Up Old Streams ---
+echo "Cleaning up recorders and annotators for offline streams..."
+RUNNING_RECORDERS=$(kubectl get deployments -l component=stream-recorder -o jsonpath='{range .items[*]}{.metadata.labels.stream}{"\n"}{end}')
+LIVE_STREAM_NAMES=$(echo "$STREAMS_RESPONSE" | jq -r '.data[].user_login')
+
+for stream_name in $RUNNING_RECORDERS; do
+    if ! echo "$LIVE_STREAM_NAMES" | grep -q -w "$stream_name"; then
+        echo "Stream $stream_name is offline. Deleting recorder and annotator."
+        (cd $RECORDER_MAKEFILE_PATH && make delete "stream=$stream_name")
+        (cd $ANNOTATOR_MAKEFILE_PATH && make delete "stream=$stream_name")
+    fi
+done
+
+
 if [[ -z "$LIVE_STREAMS" ]]; then
     echo "No live streams found in the LEGO category."
 else
     echo "Found live streams. Checking for active recorders..."
     echo "$LIVE_STREAMS" | while IFS= read -r stream; do
         STREAM_NAME_ORIGINAL=$(echo "$stream" | jq -r '.user_login')
+        KUBE_STREAM_NAME=$(echo "$STREAM_NAME_ORIGINAL" | sed 's/_/-/g')
 
-        echo "starting recorder for stream: $STREAM_NAME_ORIGINAL"
-        (cd $RECORDER_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL" "fps=${FPS:-.1}" "duration=${DURATION:-180}")
+        # Check for recorder
+        if kubectl get deployment "stream-recorder-$KUBE_STREAM_NAME" >/dev/null 2>&1; then
+            echo "Recorder for stream $STREAM_NAME_ORIGINAL already exists. Skipping."
+        else
+            echo "starting recorder for stream: $STREAM_NAME_ORIGINAL"
+            (cd $RECORDER_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL" "fps=${FPS:-.1}")
+        fi
 
-        echo "Starting new annotator deployment for stream: $STREAM_NAME_ORIGINAL"
-        (cd $ANNOTATOR_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL")
+        # Check for annotator
+        if kubectl get deployment "annotator-$KUBE_STREAM_NAME" >/dev/null 2>&1; then
+            echo "Annotator for stream $STREAM_NAME_ORIGINAL already exists. Skipping."
+        else
+            echo "Starting new annotator deployment for stream: $STREAM_NAME_ORIGINAL"
+            (cd $ANNOTATOR_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL")
+        fi
     done
 fi
 

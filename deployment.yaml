@@ -1,13 +1,19 @@
-apiVersion: batch/v1
-kind: Job
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: stream-monitor-job
+  name: stream-monitor
 spec:
-  ttlSecondsAfterFinished: 100
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stream-monitor
   template:
+    metadata:
+      labels:
+        app: stream-monitor
     spec:
       serviceAccountName: stream-monitor-sa
-      restartPolicy: OnFailure
+      restartPolicy: Always
       volumes:
       - name: nfs-storage
         persistentVolumeClaim:
@@ -32,13 +38,15 @@ spec:
               key: client_secret
         - name: FPS
           value: ".05"
-        - name: DURATION
-          value: "900"
         command: ["/bin/sh", "-c"]
         args:
         - |
-          mkdir -p /mnt/nfs/jobs/stream-monitor && \
-          /app/monitor.sh 2>&1 | tee /mnt/nfs/jobs/stream-monitor/${POD_NAME}.log
+          while true; do
+            mkdir -p /mnt/nfs/jobs/stream-monitor && \
+            /app/monitor.sh 2>&1 | tee /mnt/nfs/jobs/stream-monitor/${POD_NAME}.log
+            echo "Sleeping for 15 minutes..."
+            sleep 900
+          done
         volumeMounts:
         - name: nfs-storage
           mountPath: /mnt/nfs
