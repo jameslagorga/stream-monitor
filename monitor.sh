@@ -57,7 +57,7 @@ else
         STREAM_NAME_ORIGINAL=$(echo "$stream" | jq -r '.user_login')
 
         echo "starting recorder for stream: $STREAM_NAME_ORIGINAL"
-        (cd $RECORDER_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL" "fps=0.1" "duration=180")
+        (cd $RECORDER_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL" "fps=${FPS:-.1}" "duration=${DURATION:-180}")
 
         echo "Starting new annotator deployment for stream: $STREAM_NAME_ORIGINAL"
         (cd $ANNOTATOR_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL")

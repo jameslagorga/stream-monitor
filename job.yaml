@@ -30,6 +30,10 @@ spec:
             secretKeyRef:
               name: twitch-api-credentials
               key: client_secret
+        - name: FPS
+          value: ".05"
+        - name: DURATION
+          value: "900"
         command: ["/bin/sh", "-c"]
         args:
         - |
