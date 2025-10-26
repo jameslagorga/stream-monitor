@@ -7,7 +7,8 @@ GAME_NAME="LEGO & Brickbuilding"
 NFS_BASE_PATH="/mnt/nfs"
 STREAMS_PATH="$NFS_BASE_PATH/streams"
 UI_OUTPUT_PATH="$NFS_BASE_PATH/ui"
-RECORDER_MAKEFILE_PATH="/app/recorder/Makefile" # Path inside the container
+RECORDER_MAKEFILE_PATH="/app/recorder"
+ANNOTATOR_MAKEFILE_PATH="/app/annotator"
 
 echo "--- Running Monitor Cycle (Bash - Aggregation Only) ---"
 
@@ -54,16 +55,12 @@ else
     echo "Found live streams. Checking for active recorders..."
     echo "$LIVE_STREAMS" | while IFS= read -r stream; do
         STREAM_NAME_ORIGINAL=$(echo "$stream" | jq -r '.user_login')
-        # Sanitize the name for Kubernetes by replacing underscores with hyphens.
-        STREAM_NAME_KUBE=$(echo "$STREAM_NAME_ORIGINAL" | sed 's/_/-/g')
 
-        if kubectl get deployment "stream-recorder-$STREAM_NAME_KUBE" >/dev/null 2>&1; then
-            echo "Recorder for '$STREAM_NAME_ORIGINAL' is already running. Skipping."
-        else
-            echo "Starting new recorder for stream: $STREAM_NAME_ORIGINAL"
-            # Pass the original name to the 'stream' variable for the makefile
-            make -f "$RECORDER_MAKEFILE_PATH" apply "stream=$STREAM_NAME_ORIGINAL" "fps=0.1" "duration=3600"
-        fi
+        echo "starting recorder for stream: $STREAM_NAME_ORIGINAL"
+        (cd $RECORDER_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL" "fps=0.1" "duration=180")
+
+        echo "Starting new annotator deployment for stream: $STREAM_NAME_ORIGINAL"
+        (cd $ANNOTATOR_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL")
     done
 fi
 

@@ -11,7 +11,7 @@ metadata:
 rules:
 - apiGroups: ["apps"]
   resources: ["deployments"]
-  verbs: ["get", "list", "create"]
+  verbs: ["get", "list", "create", "delete", "patch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

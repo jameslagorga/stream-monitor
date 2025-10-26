@@ -16,5 +16,7 @@ RUN chmod +x monitor.sh
 
 # Copy the recorder assets from their location relative to the project root
 COPY recorder/Makefile recorder/deployment.yaml.template ./recorder/
+# Copy the annotator assets from their location relative to the project root
+COPY annotator/Makefile annotator/annotator-deployment.yaml.template ./annotator/
 
 CMD ["./monitor.sh"]
