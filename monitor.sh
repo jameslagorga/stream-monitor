@@ -9,8 +9,19 @@ STREAMS_PATH="$NFS_BASE_PATH/streams"
 UI_OUTPUT_PATH="$NFS_BASE_PATH/ui"
 RECORDER_MAKEFILE_PATH="/app/recorder"
 ANNOTATOR_MAKEFILE_PATH="/app/annotator"
+HAMER_MAKEFILE_PATH="/app/hamer"
 
 echo "--- Running Monitor Cycle (Bash - Aggregation Only) ---"
+
+# --- 0. Start HAMER Hand Counter if not running ---
+echo "Checking for HAMER hand counter..."
+if ! kubectl get deployment hamer-hand-counter >/dev/null 2>&1; then
+    echo "HAMER hand counter not found. Starting..."
+    cd $HAMER_MAKEFILE_PATH && make apply-hand-counter
+else
+    echo "HAMER hand counter is already running."
+fi
+
 
 # --- 1. Authenticate with Twitch ---
 if [[ -z "$TWITCH_CLIENT_ID" || -z "$TWITCH_CLIENT_SECRET" ]]; then
@@ -57,8 +68,8 @@ LIVE_STREAM_NAMES=$(echo "$STREAMS_RESPONSE" | jq -r '.data[].user_login')
 for stream_name in $RUNNING_RECORDERS; do
     if ! echo "$LIVE_STREAM_NAMES" | grep -q -w "$stream_name"; then
         echo "Stream $stream_name is offline. Deleting recorder and annotator."
-        (cd $RECORDER_MAKEFILE_PATH && make delete "stream=$stream_name")
-        (cd $ANNOTATOR_MAKEFILE_PATH && make delete "stream=$stream_name")
+        cd $RECORDER_MAKEFILE_PATH && make delete "stream=$stream_name"
+        cd $ANNOTATOR_MAKEFILE_PATH && make delete "stream=$stream_name"
     fi
 done
 
@@ -69,14 +80,14 @@ else
     echo "Found live streams. Checking for active recorders..."
     echo "$LIVE_STREAMS" | while IFS= read -r stream; do
         STREAM_NAME_ORIGINAL=$(echo "$stream" | jq -r '.user_login')
-        KUBE_STREAM_NAME=$(echo "$STREAM_NAME_ORIGINAL" | sed 's/_/-/g')
+        KUBE_STREAM_NAME=$(echo "$STREAM_NAME_ORIGINAL" | sed 's/_/-/g' | sed 's/-$//')
 
         # Check for recorder
         if kubectl get deployment "stream-recorder-$KUBE_STREAM_NAME" >/dev/null 2>&1; then
             echo "Recorder for stream $STREAM_NAME_ORIGINAL already exists. Skipping."
         else
             echo "starting recorder for stream: $STREAM_NAME_ORIGINAL"
-            (cd $RECORDER_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL" "fps=${FPS:-.1}")
+            cd $RECORDER_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL" "fps=${FPS:-.1}" "duration="
         fi
 
         # Check for annotator
@@ -84,7 +95,7 @@ else
             echo "Annotator for stream $STREAM_NAME_ORIGINAL already exists. Skipping."
         else
             echo "Starting new annotator deployment for stream: $STREAM_NAME_ORIGINAL"
-            (cd $ANNOTATOR_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL")
+            cd $ANNOTATOR_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL"
         fi
     done
 fi
