@@ -1,10 +1,10 @@
 IMAGE_NAME := gcr.io/lagorgeous-helping-hands/stream-monitor:latest
 DOCKERFILE := Dockerfile
 DOCKER_BUILD_PLATFORM := linux/amd64
-DEPLOYMENT_CHART := deployment.yaml
 RBAC_CHART := rbac.yaml
+JOB_CHART := monitor-job.yaml
 
-.PHONY: all build push apply delete
+.PHONY: all build push apply delete apply-job delete-job
 
 all: build push
 
@@ -16,8 +16,8 @@ push:
 
 apply:
 	kubectl apply -f $(RBAC_CHART)
-	kubectl apply -f $(DEPLOYMENT_CHART)
+	kubectl apply -f $(JOB_CHART)
 
 delete:
+	kubectl delete -f $(JOB_CHART) --ignore-not-found=true
 	kubectl delete -f $(RBAC_CHART) --ignore-not-found=true
-	kubectl delete -f $(DEPLOYMENT_CHART) --ignore-not-found=true

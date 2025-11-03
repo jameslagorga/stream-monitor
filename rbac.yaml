@@ -9,8 +9,8 @@ kind: Role
 metadata:
   name: stream-monitor-role
 rules:
-- apiGroups: ["apps"]
-  resources: ["deployments"]
+- apiGroups: ["apps", "batch"]
+  resources: ["deployments", "jobs"]
   verbs: ["get", "list", "create", "delete", "patch"]
 
 ---

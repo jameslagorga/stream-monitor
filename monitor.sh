@@ -3,25 +3,16 @@
 set -e
 
 # --- Configuration ---
-GAME_NAME="LEGO & Brickbuilding"
+GAME_NAMES=(
+    "LEGO & Brickbuilding"
+    "Miniatures & Models"
+)
 NFS_BASE_PATH="/mnt/nfs"
 STREAMS_PATH="$NFS_BASE_PATH/streams"
 UI_OUTPUT_PATH="$NFS_BASE_PATH/ui"
 RECORDER_MAKEFILE_PATH="/app/recorder"
 ANNOTATOR_MAKEFILE_PATH="/app/annotator"
 HAMER_MAKEFILE_PATH="/app/hamer"
-
-echo "--- Running Monitor Cycle (Bash - Aggregation Only) ---"
-
-# --- 0. Start HAMER Hand Counter if not running ---
-echo "Checking for HAMER hand counter..."
-if ! kubectl get deployment hamer-hand-counter >/dev/null 2>&1; then
-    echo "HAMER hand counter not found. Starting..."
-    cd $HAMER_MAKEFILE_PATH && make apply-hand-counter
-else
-    echo "HAMER hand counter is already running."
-fi
-
 
 # --- 1. Authenticate with Twitch ---
 if [[ -z "$TWITCH_CLIENT_ID" || -z "$TWITCH_CLIENT_SECRET" ]]; then
@@ -37,45 +28,68 @@ if [[ -z "$ACCESS_TOKEN" || "$ACCESS_TOKEN" == "null" ]]; then
 fi
 echo "Successfully authenticated."
 
-# --- 2. Dynamically Fetch Category ID ---
-echo "Fetching Category ID for '$GAME_NAME'"...
-# URL encode the game name
-GAME_NAME_ENCODED=$(echo "$GAME_NAME" | sed 's/ /%20/g' | sed 's/&/%26/g')
-GAMES_RESPONSE=$(curl -s -X GET "https://api.twitch.tv/helix/games?name=$GAME_NAME_ENCODED" \
-    -H "Authorization: Bearer $ACCESS_TOKEN" \
-    -H "Client-Id: $TWITCH_CLIENT_ID")
-LEGO_CATEGORY_ID=$(echo "$GAMES_RESPONSE" | jq -r '.data[0].id')
+# --- 2. Dynamically Fetch Category IDs ---
+CATEGORY_IDS=()
+for GAME_NAME in "${GAME_NAMES[@]}"; do
+    echo "Fetching Category ID for '$GAME_NAME'"...
+    # URL encode the game name
+    GAME_NAME_ENCODED=$(echo "$GAME_NAME" | sed 's/ /%20/g' | sed 's/&/%26/g')
+    GAMES_RESPONSE=$(curl -s -X GET "https://api.twitch.tv/helix/games?name=$GAME_NAME_ENCODED" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Client-Id: $TWITCH_CLIENT_ID")
+    CATEGORY_ID=$(echo "$GAMES_RESPONSE" | jq -r '.data[0].id')
 
-if [[ -z "$LEGO_CATEGORY_ID" || "$LEGO_CATEGORY_ID" == "null" ]]; then
-    echo "ERROR: Could not find Category ID for '$GAME_NAME'. Response: $GAMES_RESPONSE" >&2
-    exit 1
-fi
-echo "Successfully found Category ID for '$GAME_NAME': $LEGO_CATEGORY_ID"
-
-
-# --- 3. Fetch Live Streams and Start Recorders and Annotators ---
-echo "Fetching live streams for category ID $LEGO_CATEGORY_ID"...
-STREAMS_RESPONSE=$(curl -s -X GET "https://api.twitch.tv/helix/streams?game_id=$LEGO_CATEGORY_ID&first=20" \
-    -H "Authorization: Bearer $ACCESS_TOKEN" \
-    -H "Client-Id: $TWITCH_CLIENT_ID")
-LIVE_STREAMS=$(echo "$STREAMS_RESPONSE" | jq -c '.data[]')
-
-# --- 4. Clean Up Old Streams ---
-echo "Cleaning up recorders and annotators for offline streams..."
-RUNNING_RECORDERS=$(kubectl get deployments -l component=stream-recorder -o jsonpath='{range .items[*]}{.metadata.labels.stream}{"\n"}{end}')
-LIVE_STREAM_NAMES=$(echo "$STREAMS_RESPONSE" | jq -r '.data[].user_login')
-
-for stream_name in $RUNNING_RECORDERS; do
-    if ! echo "$LIVE_STREAM_NAMES" | grep -q -w "$stream_name"; then
-        echo "Stream $stream_name is offline. Deleting recorder and annotator."
-        cd $RECORDER_MAKEFILE_PATH && make delete "stream=$stream_name"
-        cd $ANNOTATOR_MAKEFILE_PATH && make delete "stream=$stream_name"
+    if [[ -z "$CATEGORY_ID" || "$CATEGORY_ID" == "null" ]]; then
+        echo "WARNING: Could not find Category ID for '$GAME_NAME'. Response: $GAMES_RESPONSE" >&2
+    else
+        echo "Successfully found Category ID for '$GAME_NAME': $CATEGORY_ID"
+        CATEGORY_IDS+=($CATEGORY_ID)
     fi
 done
 
+if [ ${#CATEGORY_IDS[@]} -eq 0 ]; then
+    echo "ERROR: No valid category IDs found." >&2
+    exit 1
+fi
 
+
+# --- 3. Fetch Live Streams ---
+GAME_ID_QUERY_PARAMS=$(printf "game_id=%s&" "${CATEGORY_IDS[@]}")
+GAME_ID_QUERY_PARAMS=${GAME_ID_QUERY_PARAMS%&}
+echo "Fetching live streams for category IDs ${CATEGORY_IDS[*]}..." 
+
+ALL_LIVE_STREAMS_JSON="[]"
+CURSOR=""
+
+while true; do
+    API_URL="https://api.twitch.tv/helix/streams?${GAME_ID_QUERY_PARAMS}&first=100"
+    if [[ -n "$CURSOR" && "$CURSOR" != "null" ]]; then
+        API_URL="${API_URL}&after=$CURSOR"
+    fi
+
+    STREAMS_RESPONSE=$(curl -s -X GET "$API_URL" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Client-Id: $TWITCH_CLIENT_ID")
+
+    # Check for errors in response
+    if echo "$STREAMS_RESPONSE" | jq -e '.error' > /dev/null; then
+        echo "ERROR: Twitch API returned an error: $(echo $STREAMS_RESPONSE | jq -r '.message')"
+        break
+    fi
+
+    ALL_LIVE_STREAMS_JSON=$(echo "$ALL_LIVE_STREAMS_JSON" | jq --argjson new_data "$(echo "$STREAMS_RESPONSE" | jq '.data')" '. + $new_data')
+
+    CURSOR=$(echo "$STREAMS_RESPONSE" | jq -r '.pagination.cursor')
+    if [[ -z "$CURSOR" || "$CURSOR" == "null" ]]; then
+        break # No more pages
+    fi
+done
+
+LIVE_STREAMS=$(echo "$ALL_LIVE_STREAMS_JSON" | jq -c '.[]' | head -n 8)
+
+# --- 4. Start Recorders ---
 if [[ -z "$LIVE_STREAMS" ]]; then
-    echo "No live streams found in the LEGO category."
+    echo "No live streams found in the selected categories."
 else
     echo "Found live streams. Checking for active recorders..."
     echo "$LIVE_STREAMS" | while IFS= read -r stream; do
@@ -83,21 +97,11 @@ else
         KUBE_STREAM_NAME=$(echo "$STREAM_NAME_ORIGINAL" | sed 's/_/-/g' | sed 's/-$//')
 
         # Check for recorder
-        if kubectl get deployment "stream-recorder-$KUBE_STREAM_NAME" >/dev/null 2>&1; then
+        if kubectl get job "stream-recorder-$KUBE_STREAM_NAME" >/dev/null 2>&1; then
             echo "Recorder for stream $STREAM_NAME_ORIGINAL already exists. Skipping."
         else
             echo "starting recorder for stream: $STREAM_NAME_ORIGINAL"
-            cd $RECORDER_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL" "fps=${FPS:-.1}" "duration="
-        fi
-
-        # Check for annotator
-        if kubectl get deployment "annotator-$KUBE_STREAM_NAME" >/dev/null 2>&1; then
-            echo "Annotator for stream $STREAM_NAME_ORIGINAL already exists. Skipping."
-        else
-            echo "Starting new annotator deployment for stream: $STREAM_NAME_ORIGINAL"
-            cd $ANNOTATOR_MAKEFILE_PATH && make apply "stream=$STREAM_NAME_ORIGINAL"
+            sed -e "s/{{STREAM_NAME}}/$STREAM_NAME_ORIGINAL/g" -e "s/{{STREAM_NAME_KUBE}}/$KUBE_STREAM_NAME/g" -e "s/{{SAMPLING_FPS}}/${FPS:20}/g" /app/recorder/deployment.yaml.template | kubectl apply -f -
         fi
     done
 fi
-
-echo "--- Cycle finished. ---"
