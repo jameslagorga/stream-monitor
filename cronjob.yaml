@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: stream-monitor-cronjob
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: stream-monitor-sa
+          restartPolicy: OnFailure
+          volumes:
+          - name: nfs-storage
+            persistentVolumeClaim:
+              claimName: filestore-pvc
+          containers:
+          - name: monitor
+            image: gcr.io/lagorgeous-helping-hands/stream-monitor:latest
+            imagePullPolicy: Always
+            env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: TWITCH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: twitch-api-credentials
+                  key: client_id
+            - name: TWITCH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: twitch-api-credentials
+                  key: client_secret
+            - name: FPS
+              value: ".05"
+            - name: TARGET_RECORDER_COUNT
+              value: "8"
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              mkdir -p /mnt/nfs/jobs/stream-monitor && \
+              /app/monitor.sh 2>&1 | tee /mnt/nfs/jobs/stream-monitor/$(date +%s)-${POD_NAME}.log
+            volumeMounts:
+            - name: nfs-storage
+              mountPath: /mnt/nfs

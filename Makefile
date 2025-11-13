@@ -2,9 +2,9 @@ IMAGE_NAME := gcr.io/lagorgeous-helping-hands/stream-monitor:latest
 DOCKERFILE := Dockerfile
 DOCKER_BUILD_PLATFORM := linux/amd64
 RBAC_CHART := rbac.yaml
-JOB_CHART := monitor-job.yaml
+CRONJOB_CHART := cronjob.yaml
 
-.PHONY: all build push apply delete apply-job delete-job
+.PHONY: all build push apply delete apply-cronjob delete-cronjob
 
 all: build push
 
@@ -14,10 +14,14 @@ build:
 push:
 	docker push $(IMAGE_NAME)
 
-apply:
-	kubectl apply -f $(RBAC_CHART)
-	kubectl apply -f $(JOB_CHART)
+apply: apply-cronjob
 
-delete:
-	kubectl delete -f $(JOB_CHART) --ignore-not-found=true
+delete: delete-cronjob
+
+apply-cronjob:
+	kubectl apply -f $(RBAC_CHART)
+	kubectl apply -f $(CRONJOB_CHART)
+
+delete-cronjob:
+	kubectl delete -f $(CRONJOB_CHART) --ignore-not-found=true
 	kubectl delete -f $(RBAC_CHART) --ignore-not-found=true
