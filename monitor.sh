@@ -79,6 +79,7 @@ echo "$TOP_STREAMS" | jq -r '.[] | .user_login' | while IFS= read -r STREAM_NAME
     sed -e "s/{{STREAM_NAME}}/$STREAM_NAME/g" \
         -e "s/{{STREAM_NAME_KUBE}}/$KUBE_STREAM_NAME/g" \
         -e "s/{{SAMPLING_FPS}}/20/g" \
+        -e "s/{{DURATION}}/600/g" \
         "$RECORDER_TEMPLATE_PATH" | kubectl apply -f -
 done
 
