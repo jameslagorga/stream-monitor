@@ -24,6 +24,8 @@ if [[ -z "$ACCESS_TOKEN" || "$ACCESS_TOKEN" == "null" ]]; then
 fi
 
 # --- 3. Get Recorder Job Status ---
+
+
 # Get all streams that have a job, regardless of status
 ALL_STREAM_JOBS=$(kubectl get jobs -l component=stream-recorder -o json | jq -r '.items[] | .metadata.labels.stream' | sort -u)
 # Get only streams with an active pod
@@ -52,10 +54,45 @@ for GAME_NAME in "${GAME_NAMES[@]}"; do
     fi
     
     STREAMS_RESPONSE=$(curl -s -X GET "https://api.twitch.tv/helix/streams?game_id=${GAME_ID}&first=20" -H "Authorization: Bearer $ACCESS_TOKEN" -H "Client-Id: $TWITCH_CLIENT_ID")
-    ALL_LIVE_STREAMS_JSON=$(echo "$ALL_LIVE_STREAMS_JSON" | jq --argjson new_data "$(echo "$STREAMS_RESPONSE" | jq '.data')" '. + $new_data')
+    # Add streams to the list only if the API returned a valid data array
+    if echo "$STREAMS_RESPONSE" | jq -e '.data and (.data | length > 0)' > /dev/null; then
+        ALL_LIVE_STREAMS_JSON=$(echo "$ALL_LIVE_STREAMS_JSON" | jq --argjson new_data "$(echo "$STREAMS_RESPONSE" | jq '.data')" '. + $new_data')
+    fi
 done
 
-TOP_STREAMS=$(echo "$ALL_LIVE_STREAMS_JSON" | jq -c '[.[] | select(.type == "live")] | sort_by(-.viewer_count) | .[:20]')
+# Filter for live streams
+LIVE_STREAMS=$(echo "$ALL_LIVE_STREAMS_JSON" | jq -c '[.[] | select(.type == "live")]')
+
+# --- 5a. Fetch Rankings from Query Service ---
+echo "Fetching stream rankings from query-service..."
+RANKINGS_JSON_RAW=$(curl -s "http://query-service.default.svc.cluster.local:8080/api/rankings")
+RANKINGS_JSON="${RANKINGS_JSON_RAW:-[]}"
+
+# --- 5b. Prioritize Streams by Hand Count ---
+echo "Prioritizing streams by hand count history..."
+# Use shell parameter expansion to provide a default of '[]' if the variables are empty or null.
+# This prevents 'jq' from receiving a null input.
+TOP_STREAMS=$(
+  jq -n \
+    --argjson live_streams "${LIVE_STREAMS:-[]}" \
+    --argjson rankings "${RANKINGS_JSON:-[]}" '
+    # Create a lookup map from rankings: {stream_name: four_or_more_hands_percentage}
+    ($rankings
+      | map({(.stream_name): .four_or_more_hands_percentage})
+      | add
+    ) as $rankings_map
+    | $live_streams
+    | map(
+        . + {
+          # Add the ranking score. Use 5.0 as a default (0.05 * 100) if not found in map.
+          score: ($rankings_map[.user_login] // 5.0)
+        }
+      )
+    # Sort by the new score, descending
+    | sort_by(-.score)
+  '
+)
+
 
 # --- 6. Find and Start New Recorders ---
 CANDIDATE_COUNT=0
